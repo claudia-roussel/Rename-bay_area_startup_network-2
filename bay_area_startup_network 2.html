@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bay Area Startup Ecosystem — Interactive Network Map</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f8f9fc;
+    --surface: #ffffff;
+    --surface-alt: #f1f3f9;
+    --border: #e2e6ef;
+    --border-light: #edf0f7;
+    --text: #1a1d2e;
+    --text-secondary: #5a6078;
+    --text-muted: #8b91a8;
+    --accent: #4f6df5;
+    --accent-light: #eef1ff;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.04);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; overflow:hidden; }
+  #container { width:100vw; height:100vh; position:relative; }
+  svg { width:100%; height:100%; background:var(--bg); }
+
+  .link { stroke-opacity:0.08; transition: stroke-opacity 0.3s; }
+  .link:hover { stroke-opacity:0.6; }
+  .node-el { cursor:pointer; transition: opacity 0.3s; }
+  .node-label { font-size:9px; fill:var(--text-muted); pointer-events:none; text-anchor:middle; font-weight:500; }
+
+  #tooltip {
+    position:absolute; padding:18px 22px; background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--radius); pointer-events:none;
+    display:none; max-width:440px; font-size:13px; line-height:1.6;
+    box-shadow:var(--shadow-lg); z-index:100;
+    animation: tooltipIn 0.2s ease;
+  }
+  @keyframes tooltipIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+  #tooltip h3 { font-size:17px; margin-bottom:2px; font-weight:800; color:var(--text); }
+  #tooltip .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; margin-right:5px; letter-spacing:0.3px; }
+  #tooltip .meta { color:var(--text-secondary); font-size:12px; margin-top:4px; }
+  #tooltip .conns { color:var(--text-secondary); font-size:12px; margin-top:8px; border-top:1px solid var(--border-light); padding-top:8px; }
+  #tooltip .tag { font-size:10px; font-weight:700; display:inline-block; margin-right:4px; letter-spacing:0.4px; }
+  #tooltip .tag-target { color:#16a34a; }
+  #tooltip .tag-hub { color:#d97706; }
+  #tooltip .tag-excluded { color:#dc2626; }
+  #tooltip .tag-vc { color:#7c3aed; }
+  #tooltip .tag-event { color:#db2777; }
+
+  #header {
+    position:absolute; top:20px; left:24px; max-width:400px;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:18px 22px; box-shadow:var(--shadow-md);
+  }
+  #header h1 { font-size:22px; font-weight:900; color:var(--text); margin-bottom:4px; letter-spacing:-0.5px; }
+  #header p { font-size:11px; color:var(--text-muted); line-height:1.6; }
+
+  #search-box { position:absolute; top:130px; left:24px; }
+  #search-input {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm);
+    color:var(--text); padding:9px 14px 9px 36px; font-size:12px; width:240px; outline:none;
+    box-shadow:var(--shadow-sm); transition:border-color 0.2s, box-shadow 0.2s;
+    font-family:inherit;
+  }
+  #search-input::placeholder { color:var(--text-muted); }
+  #search-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(79,109,245,0.1); }
+  .search-icon { position:absolute; left:12px; top:11px; color:var(--text-muted); font-size:14px; }
+  #search-count { font-size:10px; color:var(--text-muted); margin-top:4px; margin-left:4px; }
+
+  #controls {
+    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+    display:flex; gap:6px; flex-wrap:wrap; justify-content:center;
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:8px 14px; box-shadow:var(--shadow-md); max-width:740px;
+  }
+  .ctrl-btn {
+    background:var(--surface-alt); border:1px solid var(--border-light);
+    color:var(--text-secondary); padding:6px 13px; border-radius:var(--radius-sm); font-size:11px;
+    cursor:pointer; transition:all 0.2s; font-weight:500; font-family:inherit; white-space:nowrap;
+  }
+  .ctrl-btn:hover { background:var(--accent-light); color:var(--accent); border-color:rgba(79,109,245,0.3); }
+  .ctrl-btn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .ctrl-sep { width:1px; background:var(--border); margin:0 4px; }
+
+  #legend {
+    position:absolute; top:20px; right:20px; background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--radius); padding:0;
+    box-shadow:var(--shadow-md); width:270px; max-height:calc(100vh - 40px); overflow:hidden; font-size:11px;
+    transition: max-height 0.3s ease;
+  }
+  #legend.collapsed { max-height:48px; }
+  #legend-header {
+    padding:13px 18px; cursor:pointer; display:flex; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--border-light); user-select:none;
+  }
+  #legend-header h4 { font-size:11px; font-weight:700; color:var(--text); letter-spacing:0.5px; text-transform:uppercase; }
+  #legend-toggle { font-size:16px; color:var(--text-muted); transition:transform 0.3s; }
+  #legend.collapsed #legend-toggle { transform:rotate(180deg); }
+  #legend-body { padding:12px 18px; overflow-y:auto; max-height:calc(100vh - 100px); }
+  #legend-body::-webkit-scrollbar { width:4px; }
+  #legend-body::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+  .legend-section-title { font-size:9px; font-weight:700; color:var(--text-muted); letter-spacing:0.8px; text-transform:uppercase; margin-top:14px; margin-bottom:8px; }
+  .legend-section-title:first-child { margin-top:0; }
+  .legend-item { display:flex; align-items:center; gap:8px; margin-bottom:3px; cursor:pointer; padding:4px 6px; border-radius:6px; transition:background 0.15s; }
+  .legend-item:hover { background:var(--surface-alt); }
+  .legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .legend-label { font-size:10.5px; color:var(--text-secondary); }
+  .legend-count { font-size:10px; color:var(--text-muted); margin-left:auto; font-weight:500; }
+  .shape-legend { display:flex; align-items:center; gap:8px; margin-bottom:5px; padding:2px 6px; }
+  .shape-icon { width:16px; text-align:center; font-size:12px; color:var(--text-muted); }
+  .shape-label { font-size:10.5px; color:var(--text-secondary); }
+
+  .edge-legend-item {
+    display:flex; align-items:flex-start; gap:10px; margin-bottom:8px; padding:8px 10px;
+    border-radius:var(--radius-sm); cursor:pointer; transition:background 0.2s;
+    border:1px solid transparent;
+  }
+  .edge-legend-item:hover { background:var(--surface-alt); border-color:var(--border-light); }
+  .edge-dot { width:14px; height:4px; border-radius:2px; flex-shrink:0; margin-top:6px; }
+  .edge-info { flex:1; }
+  .edge-name { font-size:11px; font-weight:600; color:var(--text); margin-bottom:2px; }
+  .edge-desc { font-size:10px; color:var(--text-muted); line-height:1.4; }
+  .edge-count { font-size:9px; color:var(--text-muted); font-weight:500; margin-top:2px; }
+
+  #detail-panel {
+    position:absolute; top:50%; right:290px; transform:translateY(-50%);
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:24px 26px; width:340px; display:none;
+    box-shadow:var(--shadow-lg); max-height:75vh; overflow-y:auto;
+    animation:panelIn 0.3s ease;
+  }
+  @keyframes panelIn { from { opacity:0; transform:translateY(-50%) translateX(10px); } to { opacity:1; transform:translateY(-50%) translateX(0); } }
+  #detail-panel::-webkit-scrollbar { width:4px; }
+  #detail-panel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+  #detail-panel h3 { font-size:20px; font-weight:900; margin-bottom:2px; color:var(--text); }
+  #detail-panel .dp-type { font-size:11px; font-weight:700; margin-bottom:10px; letter-spacing:0.3px; }
+  #detail-panel .dp-meta { font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.6; }
+  #detail-panel .dp-section { margin-top:14px; }
+  #detail-panel .dp-section h4 { font-size:10px; font-weight:700; color:var(--text-muted); letter-spacing:0.6px; text-transform:uppercase; margin-bottom:6px; display:flex; align-items:center; gap:6px; }
+  #detail-panel .dp-section h4 .edge-meaning { font-weight:400; font-size:9px; color:var(--text-muted); text-transform:none; letter-spacing:0; font-style:italic; }
+  #detail-panel .dp-conn {
+    font-size:11.5px; color:var(--text-secondary); margin-bottom:5px; padding:6px 10px;
+    border-left:3px solid var(--border); border-radius:0 6px 6px 0; background:var(--surface-alt);
+    transition:background 0.15s;
+  }
+  #detail-panel .dp-conn:hover { background:var(--accent-light); }
+  #detail-panel .close-btn {
+    position:absolute; top:14px; right:16px; background:var(--surface-alt);
+    border:1px solid var(--border-light); color:var(--text-muted); cursor:pointer;
+    font-size:16px; width:28px; height:28px; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; transition:all 0.2s;
+  }
+  #detail-panel .close-btn:hover { background:var(--accent-light); color:var(--accent); }
+
+  #edge-tooltip {
+    position:absolute; padding:14px 18px; background:var(--surface);
+    border:1px solid var(--border); border-radius:var(--radius); pointer-events:none;
+    display:none; max-width:360px; font-size:12px; line-height:1.5;
+    box-shadow:var(--shadow-lg); z-index:110;
+    animation: tooltipIn 0.15s ease;
+  }
+  #edge-tooltip .et-type { font-size:10px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:4px; }
+  #edge-tooltip .et-label { font-size:14px; font-weight:700; color:var(--text); margin-bottom:4px; }
+  #edge-tooltip .et-meaning { font-size:11px; color:var(--text-secondary); line-height:1.5; }
+  #edge-tooltip .et-nodes { font-size:11px; color:var(--text-muted); margin-top:6px; padding-top:6px; border-top:1px solid var(--border-light); }
+
+  #zoom-controls {
+    position:absolute; bottom:80px; right:20px; display:flex; flex-direction:column; gap:4px;
+  }
+  .zoom-btn {
+    width:36px; height:36px; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius-sm); cursor:pointer; font-size:18px; font-weight:300;
+    color:var(--text-secondary); display:flex; align-items:center; justify-content:center;
+    box-shadow:var(--shadow-sm); transition:all 0.2s; font-family:inherit;
+  }
+  .zoom-btn:hover { background:var(--accent-light); color:var(--accent); border-color:rgba(79,109,245,0.3); }
+
+  #stats { position:absolute; bottom:24px; right:20px; font-size:9px; color:var(--text-muted); }
+
+  #tour-overlay {
+    position:absolute; inset:0; background:rgba(0,0,0,0.3); backdrop-filter:blur(3px);
+    display:none; z-index:200; align-items:center; justify-content:center;
+  }
+  #tour-overlay.active { display:flex; }
+  #tour-card {
+    background:var(--surface); border-radius:var(--radius); padding:32px 36px;
+    max-width:500px; width:90%; box-shadow:var(--shadow-lg); text-align:center;
+    animation:panelIn 0.3s ease; position:relative;
+  }
+  #tour-card h2 { font-size:22px; font-weight:900; margin-bottom:6px; color:var(--text); }
+  .tour-subtitle { font-size:13px; color:var(--text-muted); margin-bottom:20px; }
+  .tour-content { text-align:left; margin-bottom:24px; }
+  .tour-edge-row { display:flex; align-items:flex-start; gap:12px; margin-bottom:12px; padding:10px 14px; border-radius:var(--radius-sm); background:var(--surface-alt); }
+  .tour-edge-dot { width:16px; height:5px; border-radius:3px; flex-shrink:0; margin-top:5px; }
+  .tour-edge-info h5 { font-size:12px; font-weight:700; color:var(--text); margin-bottom:2px; }
+  .tour-edge-info p { font-size:11px; color:var(--text-secondary); line-height:1.4; }
+  .tour-nav { display:flex; gap:10px; justify-content:center; }
+  .tour-btn { padding:10px 24px; border-radius:var(--radius-sm); font-size:13px; font-weight:600; cursor:pointer; transition:all 0.2s; font-family:inherit; border:none; }
+  .tour-btn-primary { background:var(--accent); color:#fff; }
+  .tour-btn-primary:hover { background:#3d5bd4; }
+  .tour-btn-secondary { background:var(--surface-alt); color:var(--text-secondary); border:1px solid var(--border); }
+  .tour-btn-secondary:hover { background:var(--accent-light); color:var(--accent); }
+  .tour-dots { display:flex; gap:6px; justify-content:center; margin-bottom:20px; }
+  .tour-dot { width:8px; height:8px; border-radius:50%; background:var(--border); transition:all 0.2s; }
+  .tour-dot.active { background:var(--accent); width:20px; border-radius:4px; }
+  #tour-close { position:absolute; top:12px; right:14px; background:none; border:none; font-size:20px; color:var(--text-muted); cursor:pointer; }
+  #tour-close:hover { color:var(--text); }
+</style>
+</head>
+<body>
+<div id="container">
+  <svg id="graph"></svg>
+  <div id="tooltip"></div>
+  <div id="edge-tooltip"></div>
+
+  <div id="header">
+    <h1>Bay Area Startup Ecosystem</h1>
+    <p>120+ orgs mapped across events, customers, investors, YC batches, talent flow, dinners, APIs & more. Hover edges to see what each connection means.</p>
+    <div style="margin-top:8px;">
+      <button class="tour-btn tour-btn-primary" onclick="startTour()" style="padding:6px 14px; font-size:11px; border:none; border-radius:6px; cursor:pointer;">
+        Explore Relationships
+      </button>
+    </div>
+  </div>
+
+  <div id="search-box">
+    <span class="search-icon">&#x2315;</span>
+    <input id="search-input" placeholder="Search companies, clusters..." oninput="searchNodes(this.value)">
+    <div id="search-count"></div>
+  </div>
+
+  <div id="legend">
+    <div id="legend-header" onclick="toggleLegend()">
+      <h4>Map Legend</h4>
+      <span id="legend-toggle">&#x25BE;</span>
+    </div>
+    <div id="legend-body"></div>
+  </div>
+
+  <div id="detail-panel">
+    <button class="close-btn" onclick="closeDetail()">&#x2715;</button>
+    <div id="dp-content"></div>
+  </div>
+
+  <div id="controls">
+    <button class="ctrl-btn" onclick="resetView()">Reset</button>
+    <button class="ctrl-btn" id="btn-labels" onclick="toggleLabels()">Labels</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" id="btn-targets" onclick="filterTargets()">ICP Targets</button>
+    <button class="ctrl-btn" id="btn-hubs" onclick="filterHubs()">Hubs</button>
+    <button class="ctrl-btn" id="btn-vc" onclick="filterVC()">Investors</button>
+    <button class="ctrl-btn" id="btn-events" onclick="filterEvents()">Events</button>
+    <div class="ctrl-sep"></div>
+    <button class="ctrl-btn" onclick="filterByEdge('talent_flow')">Talent Flow</button>
+    <button class="ctrl-btn" onclick="filterByEdge('customer')">Customer</button>
+    <button class="ctrl-btn" onclick="filterByEdge('shared_investor')">Shared Investor</button>
+    <button class="ctrl-btn" onclick="filterByEdge('yc_batch')">YC Batch</button>
+    <button class="ctrl-btn" onclick="filterByEdge('dinner')">Dinners</button>
+  </div>
+
+  <div id="zoom-controls">
+    <button class="zoom-btn" onclick="zoomIn()">+</button>
+    <button class="zoom-btn" onclick="zoomOut()">&minus;</button>
+  </div>
+
+  <div id="stats"></div>
+
+  <div id="tour-overlay">
+    <div id="tour-card">
+      <button id="tour-close" onclick="closeTour()">&#x2715;</button>
+      <div id="tour-content-area"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CLUSTERS = {
+  "0\u21921 Dinner / YC Dogpatch":"#16a34a",
+  "Dev Tools Social Graph":"#2563eb",
+  "AI Infrastructure":"#7c3aed",
+  "YC Growth-Stage":"#d97706",
+  "Cotogna Dinner / Warm Leads":"#dc2626",
+  "Connected Ecosystem":"#0891b2",
+  "Investor":"#8b5cf6",
+  "Event / Community":"#db2777",
+  "Filtered Out":"#9ca3af"
+};
+
+const EDGE_COLORS = {
+  yc_batch:"#16a34a", customer:"#2563eb", co_host:"#d97706", shared_investor:"#8b5cf6",
+  dinner:"#dc2626", talent_flow:"#ea580c", hackathon_cosponsor:"#db2777", api_integration:"#0891b2",
+  ecosystem:"#9ca3af", acquired_by:"#6b7280", compliance:"#64748b", recruiting:"#65a30d",
+  billing:"#0284c7", event_coattend:"#c026d3"
+};
+
+const EDGE_LABELS = {
+  yc_batch:"YC Batch", customer:"Customer / Vendor", co_host:"Co-hosted Event",
+  shared_investor:"Shared Investor", dinner:"Founder Dinner", talent_flow:"Talent Flow",
+  hackathon_cosponsor:"Hackathon Co-sponsor", api_integration:"API / SDK Integration",
+  ecosystem:"Ecosystem", acquired_by:"Acquired By", compliance:"Compliance",
+  recruiting:"Uses for Hiring", billing:"Billing / Payments", event_coattend:"Event Co-attendance"
+};
+
+const EDGE_MEANINGS = {
+  yc_batch: "Both companies went through Y Combinator. YC batch-mates share demo day investors, group partners, alumni Slack channels, and a lifelong network.",
+  customer: "One company is a paying customer or vendor of the other. Real revenue flows between them with active contracts and ongoing product integration.",
+  co_host: "These companies organized an event together. Co-hosting signals tight operational relationships and founders who trust each other enough to put their brand on the line.",
+  shared_investor: "Both companies share a VC or angel investor. Shared investors create warm intro paths, portfolio synergies, and sometimes competitive tensions.",
+  dinner: "Connected through a curated founder dinner or intimate networking event where founders exchange deals, intros, and real talk over several hours.",
+  talent_flow: "Key people moved from one company to the other, carrying institutional knowledge, networks, and culture. The lifeblood of ecosystem formation.",
+  hackathon_cosponsor: "Both companies co-sponsored a hackathon. Signals developer community investment and desire to build ecosystem credibility.",
+  api_integration: "Direct technical integration \u2014 one builds on or wraps the other's API/SDK. A deep product dependency: if one breaks, the other feels it.",
+  ecosystem: "Companies in the same market or complementary space. They might compete, partner, or orbit each other \u2014 they show up in the same conversations.",
+  acquired_by: "One company acquired the other, creating a parent-subsidiary relationship and signaling market consolidation.",
+  compliance: "Connected through compliance or regulatory requirements. Typically one helps the other meet security standards (SOC 2, HIPAA, etc.).",
+  recruiting: "One company uses the other for hiring. The recruiting platform sees headcount data, org structure, and growth trajectory.",
+  billing: "One company handles usage-based billing or payments for the other. Deep financial integration with visibility into revenue and pricing.",
+  event_coattend: "Key people from both companies attended the same event. Creates serendipitous connections and shared context."
+};
+
+const nodes = [
+  {id:"Mintlify",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"API docs platform",employees:"~50",hq:"SF",extra:"MCP Hackathon co-host. Customers: Cursor, Anthropic, Perplexity, Zapier, Pinecone, Supabase"},
+  {id:"Greptile",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"AI code search",employees:"~15",hq:"SF",extra:"MCP Hackathon co-host w/ Gumloop & Mintlify. YC W24"},
+  {id:"Gumloop",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"AI automation builder",employees:"~12",hq:"SF",extra:"MCP Hackathon co-host. YC S24"},
+  {id:"Pylon",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"B2B customer support in Slack",employees:"~40",hq:"SF",extra:"a16z backed. YC S23"},
+  {id:"Orb",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"Usage-based billing",employees:"~80",hq:"SF",extra:"Customers: OpenAI, Vercel, Perplexity, Replit. Stainless customer"},
+  {id:"Stainless",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"SDK generation",employees:"~30",hq:"SF",extra:"Builds SDKs for OpenAI, Anthropic, Cloudflare, LangChain. Uses Orb for billing"},
+  {id:"Firecrawl",cluster:"0\u21921 Dinner / YC Dogpatch",type:"target",tier:1,desc:"Web scraping API",employees:"~20",hq:"SF",extra:"YC S24. Customers: Zapier, Cursor. Runs on Supabase"},
+  {id:"Resend",cluster:"Dev Tools Social Graph",type:"target",tier:1,desc:"Email API for devs",employees:"~40",hq:"SF",extra:"Built on Supabase. Strong devtool community ties"},
+  {id:"Neon",cluster:"Dev Tools Social Graph",type:"target",tier:1,desc:"Serverless Postgres",employees:"~120",hq:"SF",extra:"Powers Vercel Postgres. Customers: Replit, Retool. Next.js hackathon co-sponsor"},
+  {id:"Browserbase",cluster:"Dev Tools Social Graph",type:"target",tier:1,desc:"Headless browser infra",employees:"~25",hq:"SF",extra:"YC S23. Customers: Perplexity, Vercel, 11x"},
+  {id:"Exa",cluster:"Dev Tools Social Graph",type:"target",tier:1,desc:"AI web search API",employees:"~20",hq:"SF",extra:"On Vercel. Part of AI infra ecosystem"},
+  {id:"Warp",cluster:"Dev Tools Social Graph",type:"target",tier:2,desc:"AI terminal",employees:"~80",hq:"SF",extra:"Dylan Field (Figma) angel invested. Strong dev community"},
+  {id:"Cursor",cluster:"AI Infrastructure",type:"target",tier:1,desc:"AI code editor",employees:"~60",hq:"SF",extra:"Uses Mintlify, Ashby. Next.js hackathon co-sponsor. Vercel customer"},
+  {id:"Perplexity",cluster:"AI Infrastructure",type:"target",tier:1,desc:"AI search engine",employees:"~150",hq:"SF",extra:"Founded by ex-OpenAI. Uses Browserbase, Vercel. Mintlify customer. Orb customer"},
+  {id:"Granola",cluster:"AI Infrastructure",type:"target",tier:2,desc:"AI meeting notes",employees:"~30",hq:"SF",extra:"Fast-growing AI productivity"},
+  {id:"Sierra",cluster:"AI Infrastructure",type:"target",tier:2,desc:"Conversational AI agents",employees:"~100",hq:"SF",extra:"Linear customer. Bret Taylor co-founded"},
+  {id:"Decagon",cluster:"AI Infrastructure",type:"target",tier:2,desc:"AI customer support agents",employees:"~50",hq:"SF",extra:"YC W24. AI agent space"},
+  {id:"Factory",cluster:"AI Infrastructure",type:"target",tier:2,desc:"AI coding agents (Droids)",employees:"~30",hq:"SF",extra:"Uses Orb for billing. AI eng tools space"},
+  {id:"Pika",cluster:"AI Infrastructure",type:"target",tier:2,desc:"AI video generation",employees:"~50",hq:"SF",extra:"Fast-growing generative AI"},
+  {id:"11x",cluster:"AI Infrastructure",type:"target",tier:1,desc:"AI SDRs",employees:"~80",hq:"SF",extra:"Benchmark backed. Uses Browserbase. Pinecone customer"},
+  {id:"Harvey",cluster:"AI Infrastructure",type:"target",tier:1,desc:"AI for legal",employees:"~150",hq:"SF",extra:"a16z + Sequoia backed. Uses Ashby for hiring"},
+  {id:"Hex",cluster:"YC Growth-Stage",type:"target",tier:2,desc:"Data notebooks + AI",employees:"~120",hq:"SF",extra:"a16z backed. Replaced Jupyter for many teams"},
+  {id:"Ashby",cluster:"YC Growth-Stage",type:"target",tier:1,desc:"Recruiting platform",employees:"~140",hq:"SF",extra:"Customers: Ramp, Harvey, Cursor, OpenAI, Notion"},
+  {id:"Linear",cluster:"YC Growth-Stage",type:"target",tier:1,desc:"Project tracking",employees:"~80",hq:"SF",extra:"Customers: OpenAI, Ramp, Brex, Sierra, Retool, Scale AI"},
+  {id:"PostHog",cluster:"YC Growth-Stage",type:"target",tier:2,desc:"Product analytics",employees:"~80",hq:"SF",extra:"190K+ customers. Open source. YC W20"},
+  {id:"Supabase",cluster:"YC Growth-Stage",type:"target",tier:1,desc:"Open source Firebase alt",employees:"~100",hq:"SF",extra:"Runs Resend, Firecrawl infra. Next.js hackathon co-sponsor. YC C20"},
+  {id:"WorkOS",cluster:"YC Growth-Stage",type:"target",tier:2,desc:"Enterprise auth",employees:"~70",hq:"SF",extra:"Vercel uses WorkOS. Enterprise SSO/SCIM infra"},
+  {id:"Clerk",cluster:"YC Growth-Stage",type:"target",tier:2,desc:"Auth & user mgmt",employees:"~80",hq:"SF",extra:"a16z backed. Dev-first auth platform"},
+  {id:"Cluely",cluster:"Cotogna Dinner / Warm Leads",type:"target",tier:1,desc:"AI sales copilot",employees:"~25",hq:"SF",extra:"a16z backed. Cotogna dinner attendee"},
+  {id:"Convex",cluster:"Cotogna Dinner / Warm Leads",type:"target",tier:2,desc:"Reactive backend",employees:"~40",hq:"SF",extra:"a16z backed. Developer-first backend"},
+  {id:"Huntr",cluster:"Cotogna Dinner / Warm Leads",type:"target",tier:2,desc:"Job search tracker",employees:"~15",hq:"SF",extra:"Cotogna dinner connection"},
+  {id:"LangChain",cluster:"AI Infrastructure",type:"target",tier:1,desc:"LLM framework",employees:"~80",hq:"SF",extra:"Benchmark backed. Stainless customer. Core AI infra"},
+  {id:"Pinecone",cluster:"AI Infrastructure",type:"target",tier:1,desc:"Vector database",employees:"~150",hq:"SF",extra:"Customers: Shopify, HubSpot, 11x, OpenAI, Asana. Mintlify customer"},
+  {id:"Retool",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Internal tools builder",employees:"~180",hq:"SF",extra:"Linear customer. Neon customer. Elad Gil invested"},
+  {id:"Ramp",cluster:"Connected Ecosystem",type:"target",tier:1,desc:"Corporate spend mgmt",employees:"~180",hq:"NYC/SF",extra:"Founders Fund (5 rounds). Uses Ashby, Linear. Vercel customer"},
+  {id:"Brex",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Financial OS for startups",employees:"~180",hq:"SF",extra:"Linear customer. Elad Gil invested. YC alum"},
+  {id:"Rippling",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Workforce platform",employees:"~180",hq:"SF",extra:"Integrated 150+ ex-founders. Superpower's Claudia prev worked here"},
+  {id:"Mercury",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Startup banking",employees:"~160",hq:"SF",extra:"Common startup finance stack with Ramp, Brex"},
+  {id:"Vanta",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Security compliance",employees:"~170",hq:"SF",extra:"SOC 2 for startups. Compliance ecosystem"},
+  {id:"Lattice",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"People management",employees:"~170",hq:"SF",extra:"HR/performance. Wellness adjacent"},
+  {id:"Gusto",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Payroll & benefits",employees:"~180",hq:"SF",extra:"Benefits competitor/partner"},
+  {id:"Deel",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Global payroll",employees:"~180",hq:"SF",extra:"Global workforce. Benefits ecosystem"},
+  {id:"Loom",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Async video",employees:"~170",hq:"SF",extra:"Acquired by Atlassian"},
+  {id:"Drata",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Security compliance",employees:"~170",hq:"SF/SD",extra:"Compliance automation with Vanta"},
+  {id:"Scale AI",cluster:"AI Infrastructure",type:"target",tier:2,desc:"Data labeling & AI infra",employees:"~180",hq:"SF",extra:"Linear customer. AI infrastructure ecosystem"},
+  {id:"Replit",cluster:"Dev Tools Social Graph",type:"target",tier:2,desc:"AI coding platform",employees:"~150",hq:"SF",extra:"Uses Firecrawl, Neon. CEO spoke at Cerebral Valley. Uses Orb"},
+  {id:"dbt Labs",cluster:"YC Growth-Stage",type:"target",tier:2,desc:"Data transformation",employees:"~170",hq:"SF",extra:"Elad Gil invested. Core data stack"},
+  {id:"Notion",cluster:"Connected Ecosystem",type:"target",tier:2,desc:"Connected workspace",employees:"~180",hq:"SF",extra:"Uses Ashby. Elad Gil invested"},
+  {id:"Vercel",cluster:"Dev Tools Social Graph",type:"target",tier:1,desc:"Frontend cloud",employees:"~170",hq:"SF",extra:"MCP Hackathon sponsor. Uses WorkOS, Neon, Browserbase"},
+  {id:"Stytch",cluster:"YC Growth-Stage",type:"target",tier:2,desc:"Auth infrastructure",employees:"~60",hq:"SF",extra:"Benchmark backed. Developer auth"},
+  {id:"Stripe",cluster:"Connected Ecosystem",type:"hub",desc:"Payments infrastructure",extra:"Stripe Mafia: 170+ startups. Daniela Amodei (Anthropic) is ex-Stripe"},
+  {id:"OpenAI",cluster:"AI Infrastructure",type:"hub",desc:"AI research lab",extra:"OpenAI Mafia: Anthropic, Perplexity, Sierra. Uses Ashby, Linear, Orb, Vercel, Pinecone"},
+  {id:"Anthropic",cluster:"AI Infrastructure",type:"hub",desc:"AI safety company",extra:"MCP Hackathon sponsor. Founded by ex-OpenAI. Sequoia + Thrive backed"},
+  {id:"Figma",cluster:"Connected Ecosystem",type:"hub",desc:"Design tool",extra:"Dylan Field angel invested in Warp. Elad Gil invested"},
+  {id:"Shopify",cluster:"Connected Ecosystem",type:"hub",desc:"E-commerce platform",extra:"Uses Ashby, Pinecone"},
+  {id:"Cloudflare",cluster:"Connected Ecosystem",type:"hub",desc:"Edge/CDN infrastructure",extra:"Stainless customer"},
+  {id:"Meta",cluster:"AI Infrastructure",type:"hub",desc:"Social/AI conglomerate",extra:"Stainless customer (Llama SDK). Talent source"},
+  {id:"Databricks",cluster:"AI Infrastructure",type:"hub",desc:"Data + AI platform",extra:"Thrive backed. Data/AI ecosystem"},
+  {id:"HubSpot",cluster:"Connected Ecosystem",type:"hub",desc:"CRM platform",extra:"Pinecone customer"},
+  {id:"Zapier",cluster:"Connected Ecosystem",type:"hub",desc:"Automation platform",extra:"Uses Mintlify, Firecrawl"},
+  {id:"a16z",cluster:"Investor",type:"vc",desc:"Andreessen Horowitz",extra:"Portfolio: Mintlify, Pylon, Cluely, Convex, Hex, Harvey, Clerk + more"},
+  {id:"Sequoia",cluster:"Investor",type:"vc",desc:"Sequoia Capital",extra:"Portfolio: Harvey AI, Anthropic (Jan 2026)"},
+  {id:"Benchmark",cluster:"Investor",type:"vc",desc:"Benchmark Capital",extra:"Portfolio: 11x, LangChain, Stytch"},
+  {id:"Founders Fund",cluster:"Investor",type:"vc",desc:"Peter Thiel's fund",extra:"Ramp (5 consecutive rounds), Anduril"},
+  {id:"Thrive",cluster:"Investor",type:"vc",desc:"Thrive Capital",extra:"Portfolio: Stripe, Databricks, OpenAI, Ramp, Anthropic"},
+  {id:"Elad Gil",cluster:"Investor",type:"vc",desc:"Angel investor / operator",extra:"Invested in Figma, Retool, Notion, Brex, dbt Labs, Airtable, Instacart"},
+  {id:"Khosla",cluster:"Investor",type:"vc",desc:"Khosla Ventures",extra:"First VC investor in OpenAI"},
+  {id:"Y Combinator",cluster:"Investor",type:"vc",desc:"Startup accelerator",extra:"YC batches connect dozens of companies"},
+  {id:"MCP Hackathon",cluster:"Event / Community",type:"event",desc:"Greptile+Gumloop+Mintlify organized",extra:"Sponsored by Anthropic, Vercel, Block"},
+  {id:"Cerebral Valley",cluster:"Event / Community",type:"event",desc:"AI community summit",extra:"Replit CEO + hundreds of AI founders attended"},
+  {id:"AI Engineer WWF",cluster:"Event / Community",type:"event",desc:"AI Engineer World's Fair",extra:"1200+ attendees. Major AI conference in SF"},
+  {id:"Step SF",cluster:"Event / Community",type:"event",desc:"Step SF 2025",extra:"150+ companies. Startup showcase"},
+  {id:"Cotogna Dinner",cluster:"Event / Community",type:"event",desc:"Founder dinner \u2014 North Beach SF",extra:"Cluely, Huntr, and warm lead companies attended"},
+  {id:"Next.js Hackathon",cluster:"Event / Community",type:"event",desc:"Vercel's Next.js hackathon",extra:"Co-sponsors: Anthropic, OpenAI, Cursor, Groq, Supabase, Neon"},
+  {id:"Genesis House",cluster:"Event / Community",type:"event",desc:"Hayes Valley hacker house",extra:"Part of Cerebral Valley network"},
+  {id:"HF0",cluster:"Event / Community",type:"event",desc:"Hacker house / residency",extra:"Pre-seed AI founders. Hayes Valley"},
+  {id:"Frontier Tower",cluster:"Event / Community",type:"event",desc:"450+ member AI community",extra:"Co-living/working space for AI builders"},
+  {id:"AI Tinkerers",cluster:"Event / Community",type:"event",desc:"50K+ member AI community",extra:"Monthly meetups in SF"},
+  {id:"Asana",cluster:"Filtered Out",type:"excluded",desc:"Work management (too big)",extra:"Figma CTO came from Asana. Pinecone customer"},
+  {id:"Duolingo",cluster:"Filtered Out",type:"excluded",desc:"Language learning (not B2B SaaS)",extra:"Pinecone customer"},
+  {id:"Anduril",cluster:"Filtered Out",type:"excluded",desc:"Defense tech (wrong vertical)",extra:"Founders Fund backed"},
+  {id:"Airtable",cluster:"Filtered Out",type:"excluded",desc:"Spreadsheet/DB (too big)",extra:"Elad Gil invested"},
+  {id:"Instacart",cluster:"Filtered Out",type:"excluded",desc:"Delivery (not SaaS)",extra:"Elad Gil invested"},
+  {id:"Plaid",cluster:"Filtered Out",type:"excluded",desc:"Fintech infra (too big)",extra:"Alumni created Exponent Founders Capital"}
+];
+
+const edges = [
+  {s:"Greptile",t:"Gumloop",type:"co_host",label:"MCP Hackathon co-hosts"},{s:"Greptile",t:"Mintlify",type:"co_host",label:"MCP Hackathon co-hosts"},{s:"Gumloop",t:"Mintlify",type:"co_host",label:"MCP Hackathon co-hosts"},{s:"Anthropic",t:"MCP Hackathon",type:"hackathon_cosponsor",label:"Sponsored MCP Hackathon"},{s:"Vercel",t:"MCP Hackathon",type:"hackathon_cosponsor",label:"Sponsored MCP Hackathon"},{s:"Greptile",t:"MCP Hackathon",type:"co_host",label:"Organized"},{s:"Gumloop",t:"MCP Hackathon",type:"co_host",label:"Organized"},{s:"Mintlify",t:"MCP Hackathon",type:"co_host",label:"Organized"},{s:"Vercel",t:"Next.js Hackathon",type:"co_host",label:"Organized"},{s:"Anthropic",t:"Next.js Hackathon",type:"hackathon_cosponsor",label:"Co-sponsor"},{s:"OpenAI",t:"Next.js Hackathon",type:"hackathon_cosponsor",label:"Co-sponsor"},{s:"Cursor",t:"Next.js Hackathon",type:"hackathon_cosponsor",label:"Co-sponsor"},{s:"Supabase",t:"Next.js Hackathon",type:"hackathon_cosponsor",label:"Co-sponsor"},{s:"Neon",t:"Next.js Hackathon",type:"hackathon_cosponsor",label:"Co-sponsor"},{s:"Replit",t:"Cerebral Valley",type:"event_coattend",label:"CEO attended"},{s:"Perplexity",t:"Cerebral Valley",type:"event_coattend",label:"Team attended"},{s:"Greptile",t:"Cerebral Valley",type:"event_coattend",label:"Attended"},{s:"Cluely",t:"Cotogna Dinner",type:"dinner",label:"Attended founder dinner"},{s:"Huntr",t:"Cotogna Dinner",type:"dinner",label:"Attended founder dinner"},{s:"Pylon",t:"Cotogna Dinner",type:"dinner",label:"Warm lead"},{s:"Orb",t:"Cotogna Dinner",type:"dinner",label:"Warm lead"},{s:"Cursor",t:"Mintlify",type:"customer",label:"Cursor uses Mintlify docs"},{s:"Anthropic",t:"Mintlify",type:"customer",label:"Anthropic uses Mintlify"},{s:"Perplexity",t:"Mintlify",type:"customer",label:"Perplexity uses Mintlify"},{s:"Zapier",t:"Mintlify",type:"customer",label:"Zapier uses Mintlify"},{s:"Pinecone",t:"Mintlify",type:"customer",label:"Pinecone uses Mintlify"},{s:"Supabase",t:"Mintlify",type:"customer",label:"Supabase uses Mintlify"},{s:"Perplexity",t:"Browserbase",type:"customer",label:"Perplexity uses Browserbase"},{s:"Vercel",t:"Browserbase",type:"customer",label:"Vercel uses Browserbase"},{s:"11x",t:"Browserbase",type:"customer",label:"11x uses Browserbase"},{s:"Ramp",t:"Ashby",type:"recruiting",label:"Ramp recruits via Ashby"},{s:"Harvey",t:"Ashby",type:"recruiting",label:"Harvey recruits via Ashby"},{s:"Cursor",t:"Ashby",type:"recruiting",label:"Cursor recruits via Ashby"},{s:"OpenAI",t:"Ashby",type:"recruiting",label:"OpenAI recruits via Ashby"},{s:"Notion",t:"Ashby",type:"recruiting",label:"Notion recruits via Ashby"},{s:"Shopify",t:"Ashby",type:"recruiting",label:"Shopify recruits via Ashby"},{s:"OpenAI",t:"Linear",type:"customer",label:"OpenAI uses Linear"},{s:"Ramp",t:"Linear",type:"customer",label:"Ramp uses Linear"},{s:"Brex",t:"Linear",type:"customer",label:"Brex uses Linear"},{s:"Sierra",t:"Linear",type:"customer",label:"Sierra uses Linear"},{s:"Retool",t:"Linear",type:"customer",label:"Retool uses Linear"},{s:"Scale AI",t:"Linear",type:"customer",label:"Scale AI uses Linear"},{s:"OpenAI",t:"Stainless",type:"customer",label:"OpenAI SDK by Stainless"},{s:"Anthropic",t:"Stainless",type:"customer",label:"Anthropic SDK by Stainless"},{s:"Cloudflare",t:"Stainless",type:"customer",label:"Cloudflare SDK by Stainless"},{s:"Meta",t:"Stainless",type:"customer",label:"Meta Llama SDK by Stainless"},{s:"LangChain",t:"Stainless",type:"customer",label:"LangChain SDK by Stainless"},{s:"Orb",t:"Stainless",type:"customer",label:"Orb SDK by Stainless"},{s:"OpenAI",t:"Vercel",type:"customer",label:"OpenAI frontend on Vercel"},{s:"Cursor",t:"Vercel",type:"customer",label:"Cursor on Vercel"},{s:"Exa",t:"Vercel",type:"customer",label:"Exa on Vercel"},{s:"Ramp",t:"Vercel",type:"customer",label:"Ramp on Vercel"},{s:"Perplexity",t:"Vercel",type:"customer",label:"Perplexity on Vercel"},{s:"Vercel",t:"WorkOS",type:"customer",label:"Vercel uses WorkOS"},{s:"Vercel",t:"Neon",type:"customer",label:"Vercel Postgres powered by Neon"},{s:"Replit",t:"Neon",type:"customer",label:"Replit uses Neon"},{s:"Retool",t:"Neon",type:"customer",label:"Retool uses Neon"},{s:"Resend",t:"Supabase",type:"api_integration",label:"Resend built on Supabase"},{s:"Firecrawl",t:"Supabase",type:"api_integration",label:"Firecrawl runs on Supabase"},{s:"Replit",t:"Firecrawl",type:"customer",label:"Replit uses Firecrawl"},{s:"Zapier",t:"Firecrawl",type:"customer",label:"Zapier uses Firecrawl"},{s:"Cursor",t:"Firecrawl",type:"customer",label:"Cursor uses Firecrawl"},{s:"Shopify",t:"Pinecone",type:"customer",label:"Shopify uses Pinecone"},{s:"HubSpot",t:"Pinecone",type:"customer",label:"HubSpot uses Pinecone"},{s:"11x",t:"Pinecone",type:"customer",label:"11x uses Pinecone"},{s:"OpenAI",t:"Pinecone",type:"customer",label:"OpenAI uses Pinecone"},{s:"Asana",t:"Pinecone",type:"customer",label:"Asana uses Pinecone"},{s:"Duolingo",t:"Pinecone",type:"customer",label:"Duolingo uses Pinecone"},{s:"OpenAI",t:"Orb",type:"billing",label:"OpenAI billing via Orb"},{s:"Vercel",t:"Orb",type:"billing",label:"Vercel billing via Orb"},{s:"Perplexity",t:"Orb",type:"billing",label:"Perplexity billing via Orb"},{s:"Replit",t:"Orb",type:"billing",label:"Replit billing via Orb"},{s:"Factory",t:"Orb",type:"billing",label:"Factory billing via Orb"},{s:"Mintlify",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Pylon",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Cluely",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Convex",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Hex",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Harvey",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Clerk",t:"a16z",type:"shared_investor",label:"a16z portfolio"},{s:"Harvey",t:"Sequoia",type:"shared_investor",label:"Sequoia portfolio"},{s:"Anthropic",t:"Sequoia",type:"shared_investor",label:"Sequoia invested Jan 2026"},{s:"11x",t:"Benchmark",type:"shared_investor",label:"Benchmark portfolio"},{s:"LangChain",t:"Benchmark",type:"shared_investor",label:"Benchmark portfolio"},{s:"Stytch",t:"Benchmark",type:"shared_investor",label:"Benchmark portfolio"},{s:"Ramp",t:"Founders Fund",type:"shared_investor",label:"FF backed 5 consecutive rounds"},{s:"Anduril",t:"Founders Fund",type:"shared_investor",label:"Founders Fund portfolio"},{s:"Stripe",t:"Thrive",type:"shared_investor",label:"Thrive portfolio"},{s:"Databricks",t:"Thrive",type:"shared_investor",label:"Thrive portfolio"},{s:"OpenAI",t:"Thrive",type:"shared_investor",label:"Thrive portfolio"},{s:"Ramp",t:"Thrive",type:"shared_investor",label:"Thrive portfolio"},{s:"Anthropic",t:"Thrive",type:"shared_investor",label:"Thrive portfolio"},{s:"Figma",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"Retool",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"Notion",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"Brex",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"dbt Labs",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"Airtable",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"Instacart",t:"Elad Gil",type:"shared_investor",label:"Elad Gil angel"},{s:"OpenAI",t:"Khosla",type:"shared_investor",label:"First VC investor in OpenAI"},{s:"Supabase",t:"Y Combinator",type:"yc_batch",label:"YC C20"},{s:"Firecrawl",t:"Y Combinator",type:"yc_batch",label:"YC S24"},{s:"Greptile",t:"Y Combinator",type:"yc_batch",label:"YC W24"},{s:"Gumloop",t:"Y Combinator",type:"yc_batch",label:"YC S24"},{s:"Pylon",t:"Y Combinator",type:"yc_batch",label:"YC S23"},{s:"PostHog",t:"Y Combinator",type:"yc_batch",label:"YC W20"},{s:"Brex",t:"Y Combinator",type:"yc_batch",label:"YC W17"},{s:"Browserbase",t:"Y Combinator",type:"yc_batch",label:"YC S23"},{s:"Stytch",t:"Y Combinator",type:"yc_batch",label:"YC W21"},{s:"Decagon",t:"Y Combinator",type:"yc_batch",label:"YC W24"},{s:"Stripe",t:"Anthropic",type:"talent_flow",label:"Daniela Amodei: Stripe \u2192 Anthropic president"},{s:"OpenAI",t:"Anthropic",type:"talent_flow",label:"Dario & Daniela Amodei: OpenAI \u2192 Anthropic"},{s:"OpenAI",t:"Perplexity",type:"talent_flow",label:"Aravind Srinivas: ex-OpenAI \u2192 Perplexity CEO"},{s:"Asana",t:"Figma",type:"talent_flow",label:"Figma CTO from Asana"},{s:"Figma",t:"Warp",type:"talent_flow",label:"Dylan Field angel invested in Warp"},{s:"Plaid",t:"Retool",type:"talent_flow",label:"Plaid alumni \u2192 startup ecosystem"},{s:"Stripe",t:"Ramp",type:"talent_flow",label:"Stripe alumni to fintech ecosystem"},{s:"Stripe",t:"Brex",type:"talent_flow",label:"Stripe alumni to fintech ecosystem"},{s:"Stripe",t:"Mercury",type:"talent_flow",label:"Stripe Mafia \u2192 fintech"},{s:"OpenAI",t:"Sierra",type:"talent_flow",label:"Bret Taylor co-founded (ex-Salesforce/Meta)"},{s:"Stainless",t:"Orb",type:"api_integration",label:"Stainless uses Orb SDK"},{s:"LangChain",t:"Pinecone",type:"api_integration",label:"LangChain + Pinecone integration"},{s:"LangChain",t:"OpenAI",type:"api_integration",label:"LangChain wraps OpenAI"},{s:"LangChain",t:"Anthropic",type:"api_integration",label:"LangChain wraps Anthropic"},{s:"Ramp",t:"Mercury",type:"ecosystem",label:"Startup finance stack"},{s:"Ramp",t:"Brex",type:"ecosystem",label:"Compete in corporate cards"},{s:"Vanta",t:"Drata",type:"ecosystem",label:"Compliance competitors"},{s:"WorkOS",t:"Clerk",type:"ecosystem",label:"Auth competitors"},{s:"WorkOS",t:"Stytch",type:"ecosystem",label:"Auth ecosystem"},{s:"Gusto",t:"Deel",type:"ecosystem",label:"Payroll ecosystem"},{s:"Gusto",t:"Lattice",type:"ecosystem",label:"HR/people stack"},{s:"Gusto",t:"Rippling",type:"ecosystem",label:"HR/payroll competitors"},{s:"Deel",t:"Rippling",type:"ecosystem",label:"Global payroll competitors"},{s:"Granola",t:"Loom",type:"ecosystem",label:"Async/meeting productivity"},{s:"Cursor",t:"Replit",type:"ecosystem",label:"AI coding tools"},{s:"Cursor",t:"Warp",type:"ecosystem",label:"Dev tools ecosystem"},{s:"Decagon",t:"Sierra",type:"ecosystem",label:"AI agent ecosystem"},{s:"Decagon",t:"11x",type:"ecosystem",label:"AI agent ecosystem"},{s:"Factory",t:"Cursor",type:"ecosystem",label:"AI coding agents"},{s:"Pika",t:"OpenAI",type:"ecosystem",label:"Generative AI space"},{s:"Hex",t:"dbt Labs",type:"ecosystem",label:"Data stack"},{s:"Hex",t:"Databricks",type:"ecosystem",label:"Data analytics"},{s:"Scale AI",t:"OpenAI",type:"ecosystem",label:"AI training data"},{s:"Scale AI",t:"Anthropic",type:"ecosystem",label:"AI training data"}
+];
+
+// BUILD GRAPH
+const nodeMap = new Map(nodes.map(n => [n.id, n]));
+const validEdges = edges.filter(e => nodeMap.has(e.s) && nodeMap.has(e.t)).map(e => ({source:e.s, target:e.t, type:e.type, label:e.label}));
+const width = window.innerWidth, height = window.innerHeight;
+const svg = d3.select("#graph");
+const defs = svg.append("defs");
+defs.append("pattern").attr("id","grid").attr("width",40).attr("height",40).attr("patternUnits","userSpaceOnUse")
+  .append("circle").attr("cx",20).attr("cy",20).attr("r",0.5).attr("fill","#d4d8e4");
+svg.append("rect").attr("width","100%").attr("height","100%").attr("fill","url(#grid)");
+const g = svg.append("g");
+const zoom = d3.zoom().scaleExtent([0.15,6]).on("zoom",(e)=>g.attr("transform",e.transform));
+svg.call(zoom);
+
+const simulation = d3.forceSimulation(nodes)
+  .force("link", d3.forceLink(validEdges).id(d=>d.id).distance(d=>{if(d.type==="ecosystem")return 160;if(d.type==="shared_investor"||d.type==="yc_batch")return 140;if(d.type==="talent_flow")return 130;if(d.type==="hackathon_cosponsor"||d.type==="event_coattend")return 110;return 100;}).strength(d=>{if(d.type==="co_host"||d.type==="dinner")return 0.6;if(d.type==="customer"||d.type==="recruiting")return 0.3;if(d.type==="ecosystem")return 0.08;return 0.15;}))
+  .force("charge", d3.forceManyBody().strength(d=>{if(d.type==="hub")return-600;if(d.type==="vc")return-400;if(d.type==="event")return-300;if(d.type==="target"&&d.tier===1)return-350;return-200;}))
+  .force("center", d3.forceCenter(width/2,height/2).strength(0.03))
+  .force("collision", d3.forceCollide().radius(d=>getR(d)+4));
+
+function getR(d){if(d.type==="hub")return 18;if(d.type==="vc")return 14;if(d.type==="event")return 11;if(d.type==="target"&&d.tier===1)return 12;if(d.type==="target")return 9;return 7;}
+function getC(d){return CLUSTERS[d.cluster]||"#9ca3af";}
+
+const linkG=g.append("g");
+const link=linkG.selectAll("line.link").data(validEdges).join("line").attr("class","link").attr("stroke",d=>EDGE_COLORS[d.type]||"#ccc").attr("stroke-width",d=>{if(d.type==="co_host"||d.type==="dinner")return 2.5;if(d.type==="customer"||d.type==="talent_flow")return 2;return 1.5;});
+const linkHover=linkG.selectAll("line.lh").data(validEdges).join("line").attr("class","lh").attr("stroke","transparent").attr("stroke-width",12).style("cursor","pointer");
+
+const edgeTooltip=d3.select("#edge-tooltip");
+linkHover.on("mouseover",(e,d)=>{
+  edgeTooltip.html(`<div class="et-type" style="color:${EDGE_COLORS[d.type]||'#999'}">${EDGE_LABELS[d.type]||d.type}</div><div class="et-label">${d.label}</div><div class="et-meaning">${EDGE_MEANINGS[d.type]||''}</div><div class="et-nodes">${d.source.id||d.source} \u2194 ${d.target.id||d.target}</div>`).style("display","block").style("left",(e.pageX+16)+"px").style("top",(e.pageY-12)+"px");
+  link.style("stroke-opacity",l=>l===d?0.7:0.04);
+}).on("mousemove",(e)=>{edgeTooltip.style("left",(e.pageX+16)+"px").style("top",(e.pageY-12)+"px");}).on("mouseout",()=>{edgeTooltip.style("display","none");link.style("stroke-opacity",null);});
+
+const nodeG=g.append("g");
+const node=nodeG.selectAll("g").data(nodes).join("g").attr("class","node-el").call(d3.drag().on("start",(e,d)=>{if(!e.active)simulation.alphaTarget(0.3).restart();d.fx=d.x;d.fy=d.y;}).on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y;}).on("end",(e,d)=>{if(!e.active)simulation.alphaTarget(0);d.fx=null;d.fy=null;}));
+
+node.each(function(d){
+  const el=d3.select(this),r=getR(d),c=getC(d);
+  if(d.type==="hub"){el.append("path").attr("d",d3.symbol().type(d3.symbolDiamond).size(r*r*2.5)).attr("fill",c).attr("stroke","#fff").attr("stroke-width",2).attr("opacity",0.95).style("filter","drop-shadow(0 2px 4px rgba(0,0,0,0.15))");}
+  else if(d.type==="vc"){el.append("path").attr("d",d3.symbol().type(d3.symbolTriangle).size(r*r*2)).attr("fill",c).attr("stroke","#fff").attr("stroke-width",1.5).attr("opacity",0.9).style("filter","drop-shadow(0 1px 3px rgba(0,0,0,0.12))");}
+  else if(d.type==="event"){el.append("path").attr("d",d3.symbol().type(d3.symbolStar).size(r*r*2.2)).attr("fill",c).attr("stroke","#fff").attr("stroke-width",1).attr("opacity",0.85);}
+  else if(d.type==="excluded"){el.append("rect").attr("x",-r).attr("y",-r).attr("width",r*2).attr("height",r*2).attr("rx",3).attr("fill",c).attr("opacity",0.4).attr("stroke","#fff").attr("stroke-width",0.5);}
+  else{el.append("circle").attr("r",r).attr("fill",c).attr("stroke","#fff").attr("stroke-width",d.tier===1?2:1).attr("opacity",d.tier===1?0.95:0.75).style("filter",d.tier===1?"drop-shadow(0 2px 6px rgba(0,0,0,0.15))":"");}
+});
+
+node.on("mouseenter",function(){d3.select(this).select("circle,path,rect").transition().duration(200).attr("stroke-width",3);}).on("mouseleave",function(e,d){d3.select(this).select("circle,path,rect").transition().duration(200).attr("stroke-width",d.type==="hub"?2:d.type==="vc"?1.5:d.type==="event"?1:d.tier===1?2:1);});
+
+let labelsVisible=true;
+const label=nodeG.selectAll("text").data(nodes).join("text").attr("class","node-label").attr("dy",d=>getR(d)+13).text(d=>d.id).attr("fill",d=>d.type==="hub"?"#374151":d.type==="vc"?"#6d28d9":d.type==="event"?"#be185d":"#6b7280").attr("font-weight",d=>d.type==="hub"||d.tier===1?"600":"500");
+
+const tooltip=d3.select("#tooltip");
+node.on("mouseover",(e,d)=>{
+  const conns=validEdges.filter(l=>(l.source.id||l.source)===d.id||(l.target.id||l.target)===d.id);
+  const connHtml=conns.slice(0,10).map(c=>{const other=(c.source.id||c.source)===d.id?(c.target.id||c.target):(c.source.id||c.source);return`<span style="color:${EDGE_COLORS[c.type]||'#999'}">&#x25CF;</span> ${other} \u2014 <em>${c.label||c.type}</em>`;}).join("<br>");
+  const typeTag=d.type==="target"?'<span class="tag tag-target">ICP TARGET</span>':d.type==="hub"?'<span class="tag tag-hub">ECOSYSTEM HUB</span>':d.type==="vc"?'<span class="tag tag-vc">INVESTOR</span>':d.type==="event"?'<span class="tag tag-event">EVENT</span>':'<span class="tag tag-excluded">FILTERED OUT</span>';
+  const tierBadge=d.tier?`<span class="badge" style="background:${d.tier===1?'rgba(22,163,74,0.1);color:#16a34a':'rgba(0,0,0,0.04);color:#888'}">${d.tier===1?'Tier 1':'Tier 2'}</span>`:'';
+  tooltip.html(`<h3>${d.id}</h3>${typeTag} ${tierBadge}${d.employees?`<div class="meta">${d.employees} \u00B7 ${d.hq||'SF'}</div>`:''}<div class="meta">${d.desc||''}</div>${d.extra?`<div class="meta" style="margin-top:6px">${d.extra}</div>`:''}${conns.length?`<div class="conns"><strong>${conns.length} connection${conns.length>1?'s':''}</strong><br>${connHtml}${conns.length>10?'<br><em>...+'+(conns.length-10)+' more</em>':''}</div>`:''}`).style("display","block").style("left",(e.pageX+18)+"px").style("top",(e.pageY-10)+"px");
+}).on("mouseout",()=>tooltip.style("display","none"));
+
+node.on("click",(e,d)=>{e.stopPropagation();showDetail(d);});
+svg.on("click",()=>closeDetail());
+
+function showDetail(d){
+  const panel=d3.select("#detail-panel");
+  const conns=validEdges.filter(l=>(l.source.id||l.source)===d.id||(l.target.id||l.target)===d.id);
+  const grouped={};conns.forEach(c=>{if(!grouped[c.type])grouped[c.type]=[];const other=(c.source.id||c.source)===d.id?(c.target.id||c.target):(c.source.id||c.source);grouped[c.type].push({other,label:c.label||c.type});});
+  let html=`<h3>${d.id}</h3>`;
+  const typeLabel=d.type==="target"?"ICP Target":d.type==="hub"?"Ecosystem Hub":d.type==="vc"?"Investor":d.type==="event"?"Event / Community":"Filtered Out";
+  const typeColor=d.type==="target"?"#16a34a":d.type==="hub"?"#d97706":d.type==="vc"?"#7c3aed":d.type==="event"?"#db2777":"#6b7280";
+  html+=`<div class="dp-type" style="color:${typeColor}">${typeLabel}${d.tier?` \u00B7 Tier ${d.tier}`:''}</div>`;
+  html+=`<div class="dp-meta">${d.desc||''}${d.employees?` \u00B7 ${d.employees}`:''}${d.hq?` \u00B7 ${d.hq}`:''}</div>`;
+  if(d.extra)html+=`<div class="dp-meta" style="margin-top:6px">${d.extra}</div>`;
+  for(const[type,list]of Object.entries(grouped)){
+    const meaning=EDGE_MEANINGS[type]?`<span class="edge-meaning">${EDGE_MEANINGS[type].split('.')[0]}.</span>`:'';
+    html+=`<div class="dp-section"><h4><span style="display:inline-block;width:10px;height:4px;border-radius:2px;background:${EDGE_COLORS[type]||'#ccc'};margin-right:4px;"></span>${EDGE_LABELS[type]||type} (${list.length}) ${meaning}</h4>`;
+    list.forEach(c=>{html+=`<div class="dp-conn" style="border-left-color:${EDGE_COLORS[type]||'#ccc'}">${c.other} \u2014 ${c.label}</div>`;});
+    html+=`</div>`;
+  }
+  d3.select("#dp-content").html(html);panel.style("display","block");
+  node.transition().duration(300).style("opacity",n=>{if(n.id===d.id)return 1;return conns.some(c=>(c.source.id||c.source)===n.id||(c.target.id||c.target)===n.id)?0.85:0.06;});
+  link.transition().duration(300).style("stroke-opacity",l=>(l.source.id||l.source)===d.id||(l.target.id||l.target)===d.id?0.5:0.015);
+  label.transition().duration(300).style("opacity",n=>{if(n.id===d.id)return 1;return conns.some(c=>(c.source.id||c.source)===n.id||(c.target.id||c.target)===n.id)?1:0.04;});
+}
+
+function closeDetail(){d3.select("#detail-panel").style("display","none");node.transition().duration(300).style("opacity",1);link.transition().duration(300).style("stroke-opacity",null);label.transition().duration(300).style("opacity",1);}
+
+simulation.on("tick",()=>{
+  link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+  linkHover.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+  node.attr("transform",d=>`translate(${d.x},${d.y})`);label.attr("x",d=>d.x).attr("y",d=>d.y);
+});
+
+// CONTROLS
+function resetView(){closeDetail();svg.transition().duration(600).call(zoom.transform,d3.zoomIdentity);node.transition().duration(300).style("opacity",1);link.transition().duration(300).style("stroke-opacity",null);label.transition().duration(300).style("opacity",1);document.querySelectorAll('.ctrl-btn').forEach(b=>b.classList.remove('active'));document.getElementById('search-input').value='';document.getElementById('search-count').textContent='';}
+function toggleLabels(){labelsVisible=!labelsVisible;label.transition().duration(200).style("display",labelsVisible?"block":"none");document.getElementById('btn-labels').classList.toggle('active');}
+function clearFB(){['btn-targets','btn-hubs','btn-vc','btn-events'].forEach(id=>{const el=document.getElementById(id);if(el)el.classList.remove('active');});}
+function filterTargets(){closeDetail();clearFB();const btn=document.getElementById('btn-targets'),a=btn.classList.toggle('active');node.transition().duration(300).style("opacity",d=>a?(d.type==="target"?1:0.04):1);link.transition().duration(300).style("stroke-opacity",a?0.015:null);label.transition().duration(300).style("opacity",d=>a?(d.type==="target"?1:0.04):1);}
+function filterHubs(){closeDetail();clearFB();const btn=document.getElementById('btn-hubs'),a=btn.classList.toggle('active');node.transition().duration(300).style("opacity",d=>a?(d.type==="hub"?1:0.04):1);link.transition().duration(300).style("stroke-opacity",a?0.015:null);label.transition().duration(300).style("opacity",d=>a?(d.type==="hub"?1:0.04):1);}
+function filterVC(){closeDetail();clearFB();const btn=document.getElementById('btn-vc'),a=btn.classList.toggle('active');const vi=new Set(nodes.filter(n=>n.type==="vc").map(n=>n.id)),cn=new Set();if(a)validEdges.forEach(e=>{const s=e.source.id||e.source,t=e.target.id||e.target;if(vi.has(s))cn.add(t);if(vi.has(t))cn.add(s);});node.transition().duration(300).style("opacity",d=>a?(d.type==="vc"||cn.has(d.id)?1:0.04):1);link.transition().duration(300).style("stroke-opacity",l=>{if(!a)return null;const s=l.source.id||l.source,t=l.target.id||l.target;return vi.has(s)||vi.has(t)?0.5:0.015;});label.transition().duration(300).style("opacity",d=>a?(d.type==="vc"||cn.has(d.id)?1:0.04):1);}
+function filterEvents(){closeDetail();clearFB();const btn=document.getElementById('btn-events'),a=btn.classList.toggle('active');const ei=new Set(nodes.filter(n=>n.type==="event").map(n=>n.id)),cn=new Set();if(a)validEdges.forEach(e=>{const s=e.source.id||e.source,t=e.target.id||e.target;if(ei.has(s))cn.add(t);if(ei.has(t))cn.add(s);});node.transition().duration(300).style("opacity",d=>a?(d.type==="event"||cn.has(d.id)?1:0.04):1);link.transition().duration(300).style("stroke-opacity",l=>{if(!a)return null;const s=l.source.id||l.source,t=l.target.id||l.target;return ei.has(s)||ei.has(t)?0.5:0.015;});label.transition().duration(300).style("opacity",d=>a?(d.type==="event"||cn.has(d.id)?1:0.04):1);}
+function filterByEdge(et){closeDetail();clearFB();const cn=new Set();validEdges.forEach(e=>{if(e.type===et){cn.add(e.source.id||e.source);cn.add(e.target.id||e.target);}});node.transition().duration(300).style("opacity",d=>cn.has(d.id)?1:0.04);link.transition().duration(300).style("stroke-opacity",l=>l.type===et?0.6:0.015);label.transition().duration(300).style("opacity",d=>cn.has(d.id)?1:0.04);}
+function searchNodes(q){const ce=document.getElementById('search-count');if(!q){node.transition().duration(200).style("opacity",1);link.transition().duration(200).style("stroke-opacity",null);label.transition().duration(200).style("opacity",1);ce.textContent='';return;}const lq=q.toLowerCase();const m=new Set(nodes.filter(n=>n.id.toLowerCase().includes(lq)||(n.desc||'').toLowerCase().includes(lq)||(n.extra||'').toLowerCase().includes(lq)||(n.cluster||'').toLowerCase().includes(lq)).map(n=>n.id));ce.textContent=m.size+' match'+(m.size!==1?'es':'');node.transition().duration(200).style("opacity",d=>m.has(d.id)?1:0.04);link.transition().duration(200).style("stroke-opacity",l=>{const s=l.source.id||l.source,t=l.target.id||l.target;return m.has(s)&&m.has(t)?0.5:0.015;});label.transition().duration(200).style("opacity",d=>m.has(d.id)?1:0.04);}
+function zoomIn(){svg.transition().duration(300).call(zoom.scaleBy,1.5);}
+function zoomOut(){svg.transition().duration(300).call(zoom.scaleBy,0.67);}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')resetView();if(e.key==='f'&&!e.ctrlKey&&!e.metaKey&&document.activeElement.tagName!=='INPUT')document.getElementById('search-input').focus();});
+
+// LEGEND
+function toggleLegend(){document.getElementById('legend').classList.toggle('collapsed');}
+function buildLegend(){
+  const body=d3.select("#legend-body");let html='<div class="legend-section-title">Clusters</div>';
+  const cc={};nodes.forEach(n=>{cc[n.cluster]=(cc[n.cluster]||0)+1;});
+  for(const[name,color]of Object.entries(CLUSTERS)){if(!cc[name])continue;html+=`<div class="legend-item" onclick="searchNodes('${name.replace(/'/g,"\\'")}')"><div class="legend-dot" style="background:${color}"></div><span class="legend-label">${name}</span><span class="legend-count">${cc[name]}</span></div>`;}
+  html+='<div class="legend-section-title" style="margin-top:16px;">Node Shapes</div>';
+  html+=`<div class="shape-legend"><div class="shape-icon">&#x25CF;</div><span class="shape-label">ICP Target (${nodes.filter(n=>n.type==='target').length})</span></div>`;
+  html+=`<div class="shape-legend"><div class="shape-icon">&#x25C6;</div><span class="shape-label">Ecosystem Hub (${nodes.filter(n=>n.type==='hub').length})</span></div>`;
+  html+=`<div class="shape-legend"><div class="shape-icon">&#x25B2;</div><span class="shape-label">Investor (${nodes.filter(n=>n.type==='vc').length})</span></div>`;
+  html+=`<div class="shape-legend"><div class="shape-icon">&#x2605;</div><span class="shape-label">Event (${nodes.filter(n=>n.type==='event').length})</span></div>`;
+  html+=`<div class="shape-legend"><div class="shape-icon">&#x25A0;</div><span class="shape-label">Filtered Out (${nodes.filter(n=>n.type==='excluded').length})</span></div>`;
+  html+='<div class="legend-section-title" style="margin-top:16px;">Relationship Types</div>';
+  html+='<div style="font-size:9px;color:var(--text-muted);margin-bottom:10px;font-style:italic;">Click to filter \u00B7 Hover edges on map for details</div>';
+  const ue=new Set(validEdges.map(e=>e.type)),ec={};validEdges.forEach(e=>{ec[e.type]=(ec[e.type]||0)+1;});
+  for(const[type,color]of Object.entries(EDGE_COLORS)){if(!ue.has(type))continue;const desc=EDGE_MEANINGS[type]?EDGE_MEANINGS[type].split('.')[0]+'.':'';html+=`<div class="edge-legend-item" onclick="filterByEdge('${type}')"><div class="edge-dot" style="background:${color}"></div><div class="edge-info"><div class="edge-name">${EDGE_LABELS[type]||type}</div><div class="edge-desc">${desc}</div><div class="edge-count">${ec[type]||0} connections</div></div></div>`;}
+  body.html(html);
+}
+buildLegend();
+d3.select("#stats").text(`${nodes.length} orgs \u00B7 ${validEdges.length} connections \u00B7 Superpower GTM Research`);
+
+// GUIDED TOUR
+const tourPages=[
+  {title:"Welcome to the Network",subtitle:"A guided tour of how 120+ Bay Area startups connect",content:`<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;text-align:center;margin-bottom:16px;">This map shows <strong>14 different types</strong> of relationships between companies, investors, and events. Each colored line means something specific. Let\u2019s walk through what they mean.</p>`},
+  {title:"Money & Power",subtitle:"The commercial backbone of the ecosystem",content:bTER([{type:"customer",h:"The strongest signal \u2014 real revenue flows. One company pays the other."},{type:"billing",h:"Deep financial integration. The billing provider sees growth metrics & pricing."},{type:"recruiting",h:"One company uses the other to hire. Reveals org structure & growth trajectory."}])},
+  {title:"People & Capital",subtitle:"How talent and money weave the network",content:bTER([{type:"talent_flow",h:"Key people moved between companies \u2014 carrying networks, knowledge, and culture."},{type:"shared_investor",h:"Same VC/angel. Creates warm intro paths & portfolio synergies."},{type:"yc_batch",h:"YC batch-mates share demo day investors, group partners, and a lifelong network."}])},
+  {title:"Community & Events",subtitle:"Where relationships form in the physical world",content:bTER([{type:"dinner",h:"Curated founder dinners where real talk, deals, and intros happen."},{type:"co_host",h:"Co-organized an event \u2014 signals deep trust and shared audience."},{type:"hackathon_cosponsor",h:"Co-sponsored a hackathon. Developer community investment."},{type:"event_coattend",h:"Key people from both companies were at the same event."}])},
+  {title:"Technical & Market",subtitle:"Product dependencies and market dynamics",content:bTER([{type:"api_integration",h:"Direct technical integration. If one breaks, the other feels it."},{type:"ecosystem",h:"Same market or complementary space. They show up in the same conversations."}])}
+];
+function bTER(items){return items.map(i=>`<div class="tour-edge-row"><div class="tour-edge-dot" style="background:${EDGE_COLORS[i.type]}"></div><div class="tour-edge-info"><h5>${EDGE_LABELS[i.type]}</h5><p>${i.h}</p></div></div>`).join('');}
+let tourIndex=0;
+function startTour(){tourIndex=0;rTP();document.getElementById('tour-overlay').classList.add('active');}
+function closeTour(){document.getElementById('tour-overlay').classList.remove('active');}
+function nextTour(){if(tourIndex<tourPages.length-1){tourIndex++;rTP();}else closeTour();}
+function prevTour(){if(tourIndex>0){tourIndex--;rTP();}}
+function rTP(){const p=tourPages[tourIndex],a=document.getElementById('tour-content-area'),dots=tourPages.map((_,i)=>`<div class="tour-dot ${i===tourIndex?'active':''}"></div>`).join('');a.innerHTML=`<h2>${p.title}</h2><div class="tour-subtitle">${p.subtitle}</div><div class="tour-dots">${dots}</div><div class="tour-content">${p.content}</div><div class="tour-nav">${tourIndex>0?'<button class="tour-btn tour-btn-secondary" onclick="prevTour()">\u2190 Back</button>':''}<button class="tour-btn tour-btn-primary" onclick="nextTour()">${tourIndex<tourPages.length-1?'Next \u2192':'Explore the Map'}</button></div>`;}
+</script>
+</body>
+</html>
